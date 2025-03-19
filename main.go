@@ -104,7 +104,7 @@ func main() {
 		}
 	}()
 
-	go botService.StartReminder(cfg.ReminderIntervalMinutes)
+	go botService.StartReminder(cfg.ReminderIntervalMinutes, clientAsynq)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60

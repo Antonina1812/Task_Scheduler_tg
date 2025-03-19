@@ -20,7 +20,6 @@ import (
 //TODO: подключить очередь задач
 //TODO: добавить нейронку или альтернативу
 
-//TODO: разбить проект на несколько серверов
 //TODO: обернуть в докер контейнер
 //TODO: добавить кнопки
 
@@ -31,6 +30,12 @@ type Task struct {
 	Deadline       time.Time `bson:"deadline"`
 	Mark           bool      `bson:"mark"`
 	ReminderExists bool      `bson:"reminder"`
+}
+
+type TaskStatistics struct {
+	CompletedOnTime     int
+	Overdue             int
+	AverageDeadlineDays float64
 }
 
 type BotService struct {
@@ -56,52 +61,142 @@ func (bs *BotService) HandleCommand(message *tgbotapi.Message, client *asynq.Cli
 
 	switch command {
 	case "start":
+		bs.RunSettedCommand(chatID, "start")
 		state, err := bs.GetCommandState(chatID)
 		if err != nil {
 			log.Printf("Failed to get command state: %v", err)
-			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте позже.")
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
 			return
 		}
 		if state == "start" {
 			bs.SendMessage(chatID, "Привет! Я бот, который поможет тебе управлять задачами. Используй /help для просмотра доступных команд.")
 		}
-		bs.RunSetCommand(chatID, "start")
-		bs.SendMessage(chatID, "Привет! Я бот, который поможет тебе управлять задачами. Используй /help для просмотра доступных команд.")
 	case "help":
-		bs.RunSetCommand(chatID, "help")
-		bs.SendMessage(chatID, "Доступные команды:\n/add <описание задачи> - добавить задачу\n/list - список задач\n/delete <дата в формате YYYY-MM-DD HH:MM> - удалить задачу\n/is_done <текст задачи> - отметить задачу, как выполненную\n/edit <старое описание задачи> | <новое описание задачи>\n/set_deadline <описание задачи> | <дата в формате YYYY-MM-DD HH:MM>\n/set_reminder <описание задачи> - установить напоминание\n/unset_reminder <описание задачи> - отменить напоминание\n/help - помощь")
+		bs.RunSettedCommand(chatID, "help")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "help" {
+			bs.SendMessage(chatID, "Доступные команды:\n/add <описание задачи> - добавить задачу\n/list - список задач\n/delete <дата в формате YYYY-MM-DD HH:MM> - удалить задачу\n/is_done <текст задачи> - отметить задачу, как выполненную\n/edit <старое описание задачи> | <новое описание задачи>\n/set_deadline <описание задачи> | <дата в формате YYYY-MM-DD HH:MM>\n/set_reminder <описание задачи> - установить напоминание\n/unset_reminder <описание задачи> - отменить напоминание\n/stats - просмотр статистики\n/help - помощь")
+		}
 	case "add":
-		bs.RunSetCommand(chatID, "add")
-		bs.AddTask(chatID, text, client)
+		bs.RunSettedCommand(chatID, "add")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "add" {
+			bs.AddTask(chatID, text, client)
+		}
 	case "set_deadline":
-		bs.RunSetCommand(chatID, "set_deadline")
-		bs.SetDeadline(chatID, text, client)
+		bs.RunSettedCommand(chatID, "set_deadline")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "set_deadline" {
+			bs.SetDeadline(chatID, text, client)
+		}
 	case "list":
-		bs.RunSetCommand(chatID, "list")
-		bs.ListTasks(chatID)
+		bs.RunSettedCommand(chatID, "list")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "list" {
+			bs.ListTasks(chatID)
+		}
 	case "delete":
-		bs.RunSetCommand(chatID, "delete")
-		bs.DeleteTask(chatID, text)
+		bs.RunSettedCommand(chatID, "delete")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "delete" {
+			bs.DeleteTask(chatID, text)
+		}
 	case "edit":
-		bs.RunSetCommand(chatID, "edit")
-		bs.EditTask(chatID, text)
+		bs.RunSettedCommand(chatID, "edit")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "edit" {
+			bs.EditTask(chatID, text)
+		}
 	case "is_done":
-		bs.RunSetCommand(chatID, "is_done")
-		bs.IsDone(chatID, text)
+		bs.RunSettedCommand(chatID, "is_done")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "is_done" {
+			bs.IsDone(chatID, text)
+		}
 	case "set_reminder":
-		bs.RunSetCommand(chatID, "set_reminder")
-		bs.SetReminder(chatID, text, true, client)
+		bs.RunSettedCommand(chatID, "set_reminder")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "set_reminder" {
+			bs.SetReminder(chatID, text, true, client)
+		}
 	case "unset_reminder":
-		bs.RunSetCommand(chatID, "unset_reminder")
-		bs.SetReminder(chatID, text, false, client)
+		bs.RunSettedCommand(chatID, "unset_reminder")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "unset_reminder" {
+			bs.SetReminder(chatID, text, false, client)
+		}
+	case "stats":
+		bs.RunSettedCommand(chatID, "stats")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "stats" {
+			bs.ShowStats(chatID)
+		}
+	case "":
+		textWithoutCommand := message.Text
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+		}
+		bs.ChooseMethod(chatID, state, textWithoutCommand, client)
 	default:
 		bs.SendMessage(chatID, "Неизвестная команда. Используйте /help для просмотра доступных команд.")
 	}
 }
 
-func (bs *BotService) RunSetCommand(chatID int64, command string) {
+func (bs *BotService) RunSettedCommand(chatID int64, command string) {
 	red := color.New(color.FgRed).SprintFunc()
-	err := bs.SetCommandState(chatID, "unset_reminder")
+	err := bs.SetCommandState(chatID, command)
 	if err != nil {
 		log.Println(red("Failed to set command state: %v", err))
 		bs.SendMessage(chatID, "Произошла ошибка при обработке команды. Попробуйте позже.")
@@ -112,7 +207,7 @@ func (bs *BotService) RunSetCommand(chatID int64, command string) {
 func (bs *BotService) SetCommandState(userID int64, command string) error {
 	red := color.New(color.FgRed).SprintFunc()
 	key := fmt.Sprintf("user:%d:command", userID)
-	err := bs.rdb.Set(bs.redisCtx, key, command, time.Minute*5).Err()
+	err := bs.rdb.Set(bs.redisCtx, key, command, time.Minute*1).Err()
 	if err != nil {
 		log.Println(red("Failed to set command state: %v", err))
 		return err
@@ -221,7 +316,7 @@ func (bs *BotService) DeleteTask(chatID int64, text string) {
 		return
 	}
 
-	if result.DeletedCount == 0 {
+	if result.DeletedCount == 0 && text != "" {
 		bs.SendMessage(chatID, "Задача не найдена.")
 		return
 	}
@@ -254,6 +349,10 @@ func (bs *BotService) AddTask(chatID int64, description string, client *asynq.Cl
 }
 
 func (bs *BotService) EditTask(chatID int64, text string) {
+	if text == "" {
+		bs.SendMessage(chatID, "Пожалуйста, укажите описание старой и новой задачи.")
+		return
+	}
 	parts := strings.SplitN(text, "|", 2)
 	if len(parts) != 2 {
 		bs.SendMessage(chatID, "Неверный формат команды. Используйте: /edit <старое описание задачи>|<новое описание задачи>")
@@ -282,7 +381,7 @@ func (bs *BotService) EditTask(chatID int64, text string) {
 		return
 	}
 
-	if result.ModifiedCount == 0 {
+	if result.ModifiedCount == 0 && text != "" {
 		bs.SendMessage(chatID, "Задача с таким описанием не найдена, или не было изменений.")
 		return
 	}
@@ -291,9 +390,13 @@ func (bs *BotService) EditTask(chatID int64, text string) {
 }
 
 func (bs *BotService) SetDeadline(chatID int64, text string, client *asynq.Client) {
+	if text == "" {
+		bs.SendMessage(chatID, "Пожалуйста, укажите описание задачи и дедлайн.")
+		return
+	}
 	parts := strings.SplitN(text, "|", 2)
 	if len(parts) != 2 {
-		bs.SendMessage(chatID, "Неверный формат команды. Используйте: /set_deadline <номер задачи> <дата в формате YYYY-MM-DD HH:MM>")
+		bs.SendMessage(chatID, "Неверный формат команды. Используйте: /set_deadline <описание задачи> | <дата в формате YYYY-MM-DD HH:MM>")
 		return
 	}
 
@@ -331,7 +434,7 @@ func (bs *BotService) SetDeadline(chatID int64, text string, client *asynq.Clien
 		return
 	}
 
-	if result.ModifiedCount == 0 {
+	if result.ModifiedCount == 0 && text != "" {
 		bs.SendMessage(chatID, "Задача не найдена или дедлайн не был изменен.")
 		return
 	}
@@ -354,6 +457,9 @@ func (bs *BotService) SetDeadline(chatID int64, text string, client *asynq.Clien
 }
 
 func (bs *BotService) IsDone(chatID int64, text string) {
+	if text == "" {
+		bs.SendMessage(chatID, "Введите описание задачи, которую нужно отметить как выполненную.")
+	}
 	filter := bson.M{"chat_id": chatID, "description": text}
 
 	_, err := bs.db.Find(context.TODO(), filter)
@@ -370,24 +476,24 @@ func (bs *BotService) IsDone(chatID int64, text string) {
 		log.Printf("Failed to mark task: %s", err)
 	}
 
-	if result.ModifiedCount == 0 {
+	if result.ModifiedCount == 0 && text != "" {
 		bs.SendMessage(chatID, "Задача с таким описанием не найдена, или не было изменений.")
 		return
 	}
 	bs.SendMessage(chatID, "Задача выполнена!")
 }
 
-func (bs *BotService) StartReminder(intervalMinutes int) {
+func (bs *BotService) StartReminder(intervalMinutes int, client *asynq.Client) {
 	interval := time.Duration(intervalMinutes) * time.Minute
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		bs.CheckDeadlines()
+		bs.CheckDeadlines(client)
 	}
 }
 
-func (bs *BotService) CheckDeadlines() {
+func (bs *BotService) CheckDeadlines(client *asynq.Client) {
 	yellow := color.New(color.FgYellow).SprintFunc()
 	log.Println(yellow("Checking deadlines..."))
 	filter := bson.M{}
@@ -447,6 +553,7 @@ func (bs *BotService) CheckDeadlines() {
 			bs.SendMessage(task.ChatID, fmt.Sprintf("Дедлайн по задаче '%s' истёк. Дедлайн перенесён на завтра", task.Description))
 		}
 	}
+
 }
 
 func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool, client *asynq.Client) {
@@ -468,41 +575,89 @@ func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool, c
 		return
 	}
 
-	// filterAgain := bson.M{"chat_id": chatID, "description": text}
-
-	// cursor, err := bs.db.Find(context.TODO(), filterAgain)
-	// if err != nil {
-	// 	log.Printf("Failed to retrieve tasks for deadline check: %v", err)
-	// 	return
-	// }
-	// defer cursor.Close(context.TODO())
-
-	// var tasks []Task
-	// if err := cursor.All(context.TODO(), &tasks); err != nil {
-	// 	log.Printf("Failed to decode tasks: %v", err)
-	// 	return
-	// }
-
-	// for _, task := range tasks {
-	// 	if !task.Deadline.IsZero() {
-	// 		payload, err := json.Marshal(task)
-	// 		if err != nil {
-	// 			log.Printf("Error mashalling Task to json: %s", err)
-	// 		}
-
-	// 		delay := time.Until(task.Deadline)
-
-	// 		// Enqueue the task with the given parameters.
-	// 		_, err = client.Enqueue("reminder:send", payload, asynq.ProcessAt(time.Now().Add(delay)))
-	// 		if err != nil {
-	// 			log.Fatalf("could not enqueue task: %v", err)
-	// 		}
-	// 	}
-	// }
-
 	if setReminder {
 		bs.SendMessage(chatID, "Напоминание успешно установлено!")
 	} else {
 		bs.SendMessage(chatID, "Напоминание успешно отменено!")
+	}
+}
+
+func (bs *BotService) ShowStats(chatID int64) {
+	stats, err := bs.GetTaskStatistics(chatID)
+	if err != nil {
+		log.Printf("Failed to retrieve statistics: %v", err)
+		bs.SendMessage(chatID, "Не удалось получить статистику.")
+		return
+	}
+
+	message := fmt.Sprintf("Статистика по вашим задачам:\n"+
+		"Выполнено вовремя: %d\n"+
+		"Просрочено: %d\n"+
+		"Средний срок установки дедлайна: %.2f дней\n",
+		stats.CompletedOnTime, stats.Overdue, stats.AverageDeadlineDays)
+
+	bs.SendMessage(chatID, message)
+}
+
+func (bs *BotService) GetTaskStatistics(chatID int64) (TaskStatistics, error) {
+	var stats TaskStatistics
+
+	filter := bson.M{"chat_id": chatID}
+
+	cursor, err := bs.db.Find(context.TODO(), filter)
+	if err != nil {
+		return stats, err
+	}
+	defer cursor.Close(context.TODO())
+
+	var tasks []Task
+	if err := cursor.All(context.TODO(), &tasks); err != nil {
+		return stats, err
+	}
+
+	var totalDeadlineDays float64
+	var deadlineCount int
+
+	for _, task := range tasks {
+		if !task.Deadline.IsZero() {
+			deadlineCount++
+			timeUntilDead := task.Deadline.Sub(task.CreatedAt).Hours() / 24
+			totalDeadlineDays += timeUntilDead
+		}
+
+		if task.Mark {
+			if !task.Deadline.IsZero() && task.Deadline.Before(time.Now()) {
+				stats.Overdue++
+			} else {
+				stats.CompletedOnTime++
+			}
+		}
+	}
+
+	if deadlineCount > 0 {
+		stats.AverageDeadlineDays = totalDeadlineDays / float64(deadlineCount)
+	}
+
+	return stats, nil
+}
+
+func (bs *BotService) ChooseMethod(chatID int64, command string, text string, client *asynq.Client) {
+	switch command {
+	case "add":
+		bs.AddTask(chatID, text, client)
+	case "set_deadline":
+		bs.SetDeadline(chatID, text, client)
+	case "list":
+		bs.ListTasks(chatID)
+	case "delete":
+		bs.DeleteTask(chatID, text)
+	case "edit":
+		bs.EditTask(chatID, text)
+	case "is_done":
+		bs.IsDone(chatID, text)
+	case "set_reminder":
+		bs.SetReminder(chatID, text, true, client)
+	case "unset_reminder":
+		bs.SetReminder(chatID, text, false, client)
 	}
 }
