@@ -7,13 +7,16 @@ import (
 	"strings"
 	"time"
 
+	asynq "github.com/hibiken/asynq"
+
+	redis "github.com/redis/go-redis/v9"
+
+	"github.com/fatih/color"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-//TODO: если срок задачи истёк, перенести дедлайн на день и отправить сообщение пользователю
-//TODO: подключить редис
 //TODO: подключить очередь задач
 //TODO: добавить нейронку или альтернативу
 
@@ -31,57 +34,117 @@ type Task struct {
 }
 
 type BotService struct {
-	api *tgbotapi.BotAPI
-	db  *mongo.Collection
+	api      *tgbotapi.BotAPI
+	db       *mongo.Collection
+	rdb      *redis.Client
+	redisCtx context.Context
 }
 
-func NewBotService(api *tgbotapi.BotAPI, db *mongo.Collection) *BotService {
+func NewBotService(api *tgbotapi.BotAPI, db *mongo.Collection, redisClient *redis.Client) *BotService {
 	return &BotService{
-		api: api,
-		db:  db,
+		api:      api,
+		db:       db,
+		rdb:      redisClient,
+		redisCtx: context.Background(),
 	}
 }
 
-func (bs *BotService) HandleCommand(message *tgbotapi.Message) {
+func (bs *BotService) HandleCommand(message *tgbotapi.Message, client *asynq.Client) {
 	chatID := message.Chat.ID
 	command := message.Command()
 	text := message.CommandArguments()
 
 	switch command {
 	case "start":
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте позже.")
+			return
+		}
+		if state == "start" {
+			bs.SendMessage(chatID, "Привет! Я бот, который поможет тебе управлять задачами. Используй /help для просмотра доступных команд.")
+		}
+		bs.RunSetCommand(chatID, "start")
 		bs.SendMessage(chatID, "Привет! Я бот, который поможет тебе управлять задачами. Используй /help для просмотра доступных команд.")
 	case "help":
-		bs.SendMessage(chatID, "Доступные команды:\n/add <описание задачи> - добавить задачу\n/list - список задач\n/delete <дата в формате YYYY-MM-DD HH:MM> - удалить задачу\n/is_done <текст задачи> - отметить задачу, как выполненную\n/edit <старое описание задачи>|<новое описание задачи>\n/set_deadline <номер задачи> <дата в формате YYYY-MM-DD HH:MM>\n/set_reminder <описание задачи> - установить напоминание\n/unset_reminder <описание задачи> - отменить напоминание\n/help - помощь")
+		bs.RunSetCommand(chatID, "help")
+		bs.SendMessage(chatID, "Доступные команды:\n/add <описание задачи> - добавить задачу\n/list - список задач\n/delete <дата в формате YYYY-MM-DD HH:MM> - удалить задачу\n/is_done <текст задачи> - отметить задачу, как выполненную\n/edit <старое описание задачи> | <новое описание задачи>\n/set_deadline <описание задачи> | <дата в формате YYYY-MM-DD HH:MM>\n/set_reminder <описание задачи> - установить напоминание\n/unset_reminder <описание задачи> - отменить напоминание\n/help - помощь")
 	case "add":
-		bs.AddTask(chatID, text)
+		bs.RunSetCommand(chatID, "add")
+		bs.AddTask(chatID, text, client)
 	case "set_deadline":
-		bs.SetDeadline(chatID, text)
+		bs.RunSetCommand(chatID, "set_deadline")
+		bs.SetDeadline(chatID, text, client)
 	case "list":
+		bs.RunSetCommand(chatID, "list")
 		bs.ListTasks(chatID)
 	case "delete":
+		bs.RunSetCommand(chatID, "delete")
 		bs.DeleteTask(chatID, text)
 	case "edit":
+		bs.RunSetCommand(chatID, "edit")
 		bs.EditTask(chatID, text)
 	case "is_done":
+		bs.RunSetCommand(chatID, "is_done")
 		bs.IsDone(chatID, text)
 	case "set_reminder":
-		bs.SetReminder(chatID, text, true)
+		bs.RunSetCommand(chatID, "set_reminder")
+		bs.SetReminder(chatID, text, true, client)
 	case "unset_reminder":
-		bs.SetReminder(chatID, text, false)
+		bs.RunSetCommand(chatID, "unset_reminder")
+		bs.SetReminder(chatID, text, false, client)
 	default:
 		bs.SendMessage(chatID, "Неизвестная команда. Используйте /help для просмотра доступных команд.")
 	}
 }
 
+func (bs *BotService) RunSetCommand(chatID int64, command string) {
+	red := color.New(color.FgRed).SprintFunc()
+	err := bs.SetCommandState(chatID, "unset_reminder")
+	if err != nil {
+		log.Println(red("Failed to set command state: %v", err))
+		bs.SendMessage(chatID, "Произошла ошибка при обработке команды. Попробуйте позже.")
+		return
+	}
+}
+
+func (bs *BotService) SetCommandState(userID int64, command string) error {
+	red := color.New(color.FgRed).SprintFunc()
+	key := fmt.Sprintf("user:%d:command", userID)
+	err := bs.rdb.Set(bs.redisCtx, key, command, time.Minute*5).Err()
+	if err != nil {
+		log.Println(red("Failed to set command state: %v", err))
+		return err
+	}
+	return nil
+}
+
+func (bs *BotService) GetCommandState(userID int64) (string, error) {
+
+	key := fmt.Sprintf("user:%d:command", userID)
+	cmd, err := bs.rdb.Get(bs.redisCtx, key).Result()
+
+	if err == redis.Nil {
+		return "", nil
+	} else if err != nil {
+		log.Printf("Failed to get command state: %v", err)
+		return "", err
+	}
+	return cmd, nil
+}
+
 func (bs *BotService) SendMessage(chatID int64, text string) {
+	red := color.New(color.FgRed).SprintFunc()
 	msg := tgbotapi.NewMessage(chatID, text)
 	_, err := bs.api.Send(msg)
 	if err != nil {
-		log.Printf("Failed to send message: %s", err)
+		log.Println(red("Failed to send message: %s", err))
 	}
 }
 
 func (bs *BotService) ListTasks(chatID int64) {
+
 	filter := bson.M{"chat_id": chatID}
 	cursor, err := bs.db.Find(context.TODO(), filter)
 	if err != nil {
@@ -166,7 +229,7 @@ func (bs *BotService) DeleteTask(chatID int64, text string) {
 	bs.SendMessage(chatID, "Задача удалена!")
 }
 
-func (bs *BotService) AddTask(chatID int64, description string) {
+func (bs *BotService) AddTask(chatID int64, description string, client *asynq.Client) {
 	if description == "" {
 		bs.SendMessage(chatID, "Пожалуйста, укажите описание задачи.")
 		return
@@ -186,6 +249,7 @@ func (bs *BotService) AddTask(chatID int64, description string) {
 		bs.SendMessage(chatID, "Не удалось добавить задачу.")
 		return
 	}
+
 	bs.SendMessage(chatID, "Задача добавлена!")
 }
 
@@ -226,7 +290,7 @@ func (bs *BotService) EditTask(chatID int64, text string) {
 	bs.SendMessage(chatID, "Задача успешно изменена!")
 }
 
-func (bs *BotService) SetDeadline(chatID int64, text string) {
+func (bs *BotService) SetDeadline(chatID int64, text string, client *asynq.Client) {
 	parts := strings.SplitN(text, "|", 2)
 	if len(parts) != 2 {
 		bs.SendMessage(chatID, "Неверный формат команды. Используйте: /set_deadline <номер задачи> <дата в формате YYYY-MM-DD HH:MM>")
@@ -271,6 +335,21 @@ func (bs *BotService) SetDeadline(chatID int64, text string) {
 		bs.SendMessage(chatID, "Задача не найдена или дедлайн не был изменен.")
 		return
 	}
+
+	// payload, err := json.Marshal(taskToUpdate)
+	// if err != nil {
+	// log.Printf("Error mashalling Task to json: %s", err)
+	// }
+
+	// // Calculate the delay until the deadline
+	// delay := time.Until(deadlineTime)
+
+	// // Enqueue the task with the given parameters.
+	// _, err = client.Enqueue("reminder:send", payload, asynq.ProcessAt(time.Now().Add(delay)))
+	// if err != nil {
+	// log.Fatalf("could not enqueue task: %v", err)
+	// }
+
 	bs.SendMessage(chatID, "Дедлайн установлен на "+deadlineTime.Format("2006-01-02 15:04")+"!")
 }
 
@@ -309,7 +388,8 @@ func (bs *BotService) StartReminder(intervalMinutes int) {
 }
 
 func (bs *BotService) CheckDeadlines() {
-	log.Println("Checking deadlines...")
+	yellow := color.New(color.FgYellow).SprintFunc()
+	log.Println(yellow("Checking deadlines..."))
 	filter := bson.M{}
 
 	cursor, err := bs.db.Find(context.TODO(), filter)
@@ -325,26 +405,51 @@ func (bs *BotService) CheckDeadlines() {
 		return
 	}
 
-	now := time.Now()
+	location, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		log.Printf("Failed to load location: %v", err)
+		return
+	}
+
+	now := time.Now().In(location)
 
 	for _, task := range tasks {
 		timeLeft := time.Until(task.Deadline)
+		timeUntilDead := task.Deadline.Sub(now)
 
 		if !task.Deadline.IsZero() && task.ReminderExists {
 			days := int(timeLeft.Hours()) / 24
 			hours := int(timeLeft.Hours()) % 24
 			minutes := int(timeLeft.Minutes()) % 60
 			timeUntilDeadline := fmt.Sprintf(" (Осталось: %d дн. %d ч. %d мин.)", days, hours, minutes)
-			timeUntilDead := task.Deadline.Sub(now)
 
 			if timeUntilDead > 0 {
 				bs.SendMessage(task.ChatID, fmt.Sprintf("Напоминание: Скоро дедлайн по задаче \"%s\"! %s.", task.Description, timeUntilDeadline))
 			}
 		}
+		if timeUntilDead <= 0 && !task.Deadline.IsZero() {
+			newDeadline := now.Add(24 * time.Hour)
+			filter := bson.M{"chat_id": task.ChatID, "description": task.Description}
+			update := bson.M{"$set": bson.M{"deadline": newDeadline}}
+
+			result, err := bs.db.UpdateOne(context.TODO(), filter, update)
+			if err != nil {
+				log.Printf("Failed to update task: %s", err)
+				bs.SendMessage(task.ChatID, "Не удалось установить дедлайн.")
+				return
+			}
+
+			if result.ModifiedCount == 0 {
+				bs.SendMessage(task.ChatID, "Задача не найдена или дедлайн не был изменен.")
+				return
+			}
+
+			bs.SendMessage(task.ChatID, fmt.Sprintf("Дедлайн по задаче '%s' истёк. Дедлайн перенесён на завтра", task.Description))
+		}
 	}
 }
 
-func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool) {
+func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool, client *asynq.Client) {
 	if text == "" {
 		bs.SendMessage(chatID, "Пожалуйста, укажите описание задачи.")
 		return
@@ -362,6 +467,39 @@ func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool) {
 		bs.SendMessage(chatID, "Задача с таким описанием не найдена, или не было изменений.")
 		return
 	}
+
+	// filterAgain := bson.M{"chat_id": chatID, "description": text}
+
+	// cursor, err := bs.db.Find(context.TODO(), filterAgain)
+	// if err != nil {
+	// 	log.Printf("Failed to retrieve tasks for deadline check: %v", err)
+	// 	return
+	// }
+	// defer cursor.Close(context.TODO())
+
+	// var tasks []Task
+	// if err := cursor.All(context.TODO(), &tasks); err != nil {
+	// 	log.Printf("Failed to decode tasks: %v", err)
+	// 	return
+	// }
+
+	// for _, task := range tasks {
+	// 	if !task.Deadline.IsZero() {
+	// 		payload, err := json.Marshal(task)
+	// 		if err != nil {
+	// 			log.Printf("Error mashalling Task to json: %s", err)
+	// 		}
+
+	// 		delay := time.Until(task.Deadline)
+
+	// 		// Enqueue the task with the given parameters.
+	// 		_, err = client.Enqueue("reminder:send", payload, asynq.ProcessAt(time.Now().Add(delay)))
+	// 		if err != nil {
+	// 			log.Fatalf("could not enqueue task: %v", err)
+	// 		}
+	// 	}
+	// }
+
 	if setReminder {
 		bs.SendMessage(chatID, "Напоминание успешно установлено!")
 	} else {
