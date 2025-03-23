@@ -66,6 +66,8 @@ github.com/montanaflynn/stats v0.7.1 h1:etflOAAHORrCC44V+aR6Ftzort912ZU+YLiSTuV8
 github.com/montanaflynn/stats v0.7.1/go.mod h1:etXPPgVO6n31NxCd9KQUMvCM+ve0ruNzt6R8Bnaayow=
 github.com/obsc/async v0.0.0-20140730223756-a6e2df67745e h1:tfHusE8VmAN+oMzaF/pqEjCjYNTdL7lj5ETjZb5MRm0=
 github.com/obsc/async v0.0.0-20140730223756-a6e2df67745e/go.mod h1:OOLNoZckAt/V2xLM5TZa1VQ4daHOBhl1Skyb26YcKFQ=
+github.com/orktes/go-torch v0.0.0-20210423060020-e0f5fdb973e8 h1:YtOH0eFW+Jpkfn4BlywovDHlEdvy95eFOIQDhZ/7WCY=
+github.com/orktes/go-torch v0.0.0-20210423060020-e0f5fdb973e8/go.mod h1:bt1X89g10L8jXwx6yF4txru/2vCSJTIEe708YySjLq8=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/redis/go-redis/v9 v9.7.1 h1:4LhKRCIduqXqtvCUlaq9c8bdHOkICjDMrr1+Zb3osAc=
 github.com/redis/go-redis/v9 v9.7.1/go.mod h1:f6zhXITC7JUJIlPEiBOTXxJgPLdZcA93GewI7inzyWw=

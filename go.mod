@@ -12,6 +12,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hibiken/asynq v0.25.1 // indirect
 	github.com/obsc/async v0.0.0-20140730223756-a6e2df67745e // indirect
+	github.com/orktes/go-torch v0.0.0-20210423060020-e0f5fdb973e8 // indirect
 	github.com/redis/go-redis/v9 v9.7.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/cast v1.7.0 // indirect

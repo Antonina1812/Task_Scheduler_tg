@@ -68,16 +68,6 @@ func main() {
 	}
 	fmt.Println(green("Connected to Redis!\n", pong))
 
-	collection := client.Database(cfg.MongoDBDatabase).Collection("tasks")
-	botService := botservice.NewBotService(bot, collection, rdb)
-
-	command, err := botService.GetCommandState(bot.Self.ID)
-	if err != nil {
-		log.Println(red("Ошибка при получении состояния команды:", err))
-	} else if command != "" {
-		log.Println(green("Текущая команда пользователя:", command))
-	}
-
 	clientAsynq := asynq.NewClient(asynq.RedisClientOpt{Addr: cfg.RedisURI, Password: cfg.RedisPassword, DB: cfg.RedisDB})
 	defer clientAsynq.Close()
 
@@ -86,6 +76,16 @@ func main() {
 		asynq.Config{
 			Concurrency: 10,
 		})
+
+	collection := client.Database(cfg.MongoDBDatabase).Collection("tasks")
+	botService := botservice.NewBotService(bot, collection, rdb, clientAsynq)
+
+	command, err := botService.GetCommandState(bot.Self.ID)
+	if err != nil {
+		log.Println(red("Ошибка при получении состояния команды:", err))
+	} else if command != "" {
+		log.Println(green("Текущая команда пользователя:", command))
+	}
 
 	taskHandler := func(ctx context.Context, t *asynq.Task) error {
 		var taskInfo botservice.Task
