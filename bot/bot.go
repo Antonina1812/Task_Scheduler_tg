@@ -19,7 +19,6 @@ import (
 )
 
 //TODO: пользователь может сам устанавливать периодичность напоминаний
-//TODO: добавить кнопки
 
 type Task struct {
 	ChatID         int64     `bson:"chat_id"`
@@ -86,7 +85,7 @@ func (bs *BotService) HandleCommand(message *tgbotapi.Message, client *asynq.Cli
 			return
 		}
 		if state == "help" {
-			bs.SendMessage(chatID, "Доступные команды:\n/add <описание задачи> | <сложность задачи> - добавить задачу\n/list - список задач\n/delete <дата и время в формате YYYY-MM-DD HH:MM> - удалить задачу\n/is_done <текст задачи> - отметить задачу, как выполненную\n/edit <старое описание задачи> | <новое описание задачи>\n/set_deadline <описание задачи> | <дата и время в формате YYYY-MM-DD HH:MM>\n/set_reminder <описание задачи> - установить напоминание\n/unset_reminder <описание задачи> - отменить напоминание\n/stats - просмотр общей статистики\n/analyze - статистика по задачам разной сложности\n/help - помощь")
+			bs.SendMessage(chatID, "Доступные команды:\n/add <описание задачи> | <сложность задачи> - добавить задачу\n/list - список задач\n/list_by_deadline - список задач сортированный по дедлайну\n/delete <дата и время в формате YYYY-MM-DD HH:MM> - удалить задачу\n/is_done <текст задачи> - отметить задачу, как выполненную\n/edit <старое описание задачи> | <новое описание задачи>\n/set_deadline <описание задачи> | <дата и время в формате YYYY-MM-DD HH:MM>\n/set_reminder <описание задачи> - установить напоминание\n/unset_reminder <описание задачи> - отменить напоминание\n/stats - просмотр общей статистики\n/analyze - статистика по задачам разной сложности\n/help - помощь")
 		}
 	case "add":
 		bs.RunSettedCommand(chatID, "add")
@@ -120,6 +119,17 @@ func (bs *BotService) HandleCommand(message *tgbotapi.Message, client *asynq.Cli
 		}
 		if state == "list" {
 			bs.ListTasks(chatID)
+		}
+	case "list_by_deadline":
+		bs.RunSettedCommand(chatID, "list_by_deadline")
+		state, err := bs.GetCommandState(chatID)
+		if err != nil {
+			log.Printf("Failed to get command state: %v", err)
+			bs.SendMessage(chatID, "Произошла ошибка. Пожалуйста, попробуйте заново ввести команду.")
+			return
+		}
+		if state == "list_by_deadline" {
+			bs.ListTasksByDeadline(chatID)
 		}
 	case "delete":
 		bs.RunSettedCommand(chatID, "delete")
@@ -497,8 +507,9 @@ func (bs *BotService) IsDone(chatID int64, text string) {
 	if result.ModifiedCount == 0 && text != "" {
 		bs.SendMessage(chatID, "Задача с таким описанием не найдена, или не было изменений.")
 		return
+	} else {
+		bs.SendMessage(chatID, "Задача выполнена!")
 	}
-	bs.SendMessage(chatID, "Задача выполнена!")
 }
 
 func (bs *BotService) StartReminder(intervalMinutes int, client *asynq.Client) {
@@ -635,7 +646,6 @@ func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool, c
 			return
 		}
 
-		// Добавляем задачу в очередь
 		_, err = client.Enqueue(asynq.NewTask("reminder:send", payload), asynq.ProcessIn(time.Until(time.Now()))) //time.Until(scheduleAt) вычисляет время, оставшееся до момента, когда должно произойти напоминание, и передает его в функцию asynq.ProcessIn(). Таким образом, задача будет выполнена через одну минуту после установки напоминания.
 		if err != nil {
 			log.Printf("Failed to enqueue reminder task: %s", err)
@@ -643,7 +653,6 @@ func (bs *BotService) SetReminder(chatID int64, text string, setReminder bool, c
 			return
 		}
 
-		// Сохраняем напоминание в Redis
 		redisKey := fmt.Sprintf("reminder:%d:%s", chatID, text)
 		err = bs.rdb.Set(bs.redisCtx, redisKey, scheduleAt.Format(time.RFC3339), 0).Err()
 		if err != nil {
@@ -785,23 +794,23 @@ func CreateIndexes(client *mongo.Client, dbName, collectionName string) error {
 
 	indexModels := []mongo.IndexModel{
 		{
-			Keys:    bson.D{{Key: "chat_id", Value: 1}, {Key: "description", Value: 1}}, //Compound index for task lookups
-			Options: options.Index().SetName("chat_id_description").SetUnique(true),     //Unique constraint on task description for a user
+			Keys:    bson.D{{Key: "chat_id", Value: 1}, {Key: "description", Value: 1}},
+			Options: options.Index().SetName("chat_id_description").SetUnique(true),
 		},
 		{
-			Keys:    bson.D{{Key: "deadline", Value: 1}}, //Index for sorting by deadline
+			Keys:    bson.D{{Key: "deadline", Value: 1}},
 			Options: options.Index().SetName("deadline"),
 		},
 		{
-			Keys:    bson.D{{Key: "reminder", Value: 1}}, //Index for finding tasks with reminders
+			Keys:    bson.D{{Key: "reminder", Value: 1}},
 			Options: options.Index().SetName("reminder"),
 		},
 		{
-			Keys:    bson.D{{Key: "difficulty", Value: 1}}, //Index for difficulty queries
+			Keys:    bson.D{{Key: "difficulty", Value: 1}},
 			Options: options.Index().SetName("difficulty"),
 		},
 		{
-			Keys:    bson.D{{Key: "createdAt", Value: 1}}, // Index for sorting and querying by creation date
+			Keys:    bson.D{{Key: "createdAt", Value: 1}},
 			Options: options.Index().SetName("createdAt"),
 		},
 	}
@@ -814,4 +823,34 @@ func CreateIndexes(client *mongo.Client, dbName, collectionName string) error {
 
 	fmt.Println(green("Indexes created successfully!"))
 	return nil
+}
+
+func (bs *BotService) ListTasksByDeadline(chatID int64) {
+	options := options.Find().SetSort(bson.D{{Key: "deadline", Value: 1}})
+	cursor, err := bs.db.Find(context.TODO(), bson.M{"chat_id": chatID}, options)
+	if err != nil {
+		log.Printf("Failed to list tasks: %s", err)
+		bs.SendMessage(chatID, "Не удалось получить список задач.")
+		return
+	}
+	defer cursor.Close(context.TODO())
+
+	var tasks []Task
+	if err := cursor.All(context.TODO(), &tasks); err != nil {
+		log.Printf("Failed to decode tasks: %s", err)
+		bs.SendMessage(chatID, "Не удалось получить список задач.")
+		return
+	}
+
+	if len(tasks) == 0 {
+		bs.SendMessage(chatID, "Нет задач для отображения.")
+		return
+	}
+
+	message := "Список задач (сортировка по дате):\n"
+	for _, task := range tasks {
+		message += fmt.Sprintf("- %s (Дедлайн: %s)\n", task.Description, task.Deadline.Format("2006-01-02 15:04"))
+	}
+
+	bs.SendMessage(chatID, message)
 }
