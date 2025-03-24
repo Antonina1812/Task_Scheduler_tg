@@ -55,6 +55,7 @@ func main() {
 	}
 
 	fmt.Println(green("Connected to MongoDB!"))
+	go botservice.CreateIndexes(client, cfg.MongoDBDatabase, "tasks")
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisURI,

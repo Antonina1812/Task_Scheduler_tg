@@ -15,8 +15,10 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+//TODO: пользователь может сам устанавливать периодичность напоминаний
 //TODO: добавить кнопки
 
 type Task struct {
@@ -775,4 +777,41 @@ func (bs *BotService) AnalyzeTasks(chatID int64) {
 	}
 
 	bs.SendMessage(chatID, message)
+}
+
+func CreateIndexes(client *mongo.Client, dbName, collectionName string) error {
+	green := color.New(color.FgGreen).SprintFunc()
+	collection := client.Database(dbName).Collection(collectionName)
+
+	indexModels := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "chat_id", Value: 1}, {Key: "description", Value: 1}}, //Compound index for task lookups
+			Options: options.Index().SetName("chat_id_description").SetUnique(true),     //Unique constraint on task description for a user
+		},
+		{
+			Keys:    bson.D{{Key: "deadline", Value: 1}}, //Index for sorting by deadline
+			Options: options.Index().SetName("deadline"),
+		},
+		{
+			Keys:    bson.D{{Key: "reminder", Value: 1}}, //Index for finding tasks with reminders
+			Options: options.Index().SetName("reminder"),
+		},
+		{
+			Keys:    bson.D{{Key: "difficulty", Value: 1}}, //Index for difficulty queries
+			Options: options.Index().SetName("difficulty"),
+		},
+		{
+			Keys:    bson.D{{Key: "createdAt", Value: 1}}, // Index for sorting and querying by creation date
+			Options: options.Index().SetName("createdAt"),
+		},
+	}
+
+	context := context.Background()
+	_, err := collection.Indexes().CreateMany(context, indexModels)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(green("Indexes created successfully!"))
+	return nil
 }
